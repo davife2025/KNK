@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SignedVerdict } from '@knk/shared';
-import type { KeyRecord, Store, StoredEvent, UsageRecord, UsageRow, AuditEntry } from '../src/store/types.js';
+import { PolicyRules } from '@knk/shared';
+import type { ApprovalRecord, DecisionRecord, KeyRecord, Store, StoredEvent, UsageRecord, UsageRow, AuditEntry } from '../src/store/types.js';
 
 /** In-memory Store so route and auth behaviour can be tested without Supabase. */
 export function memoryStore() {
@@ -10,6 +11,9 @@ export function memoryStore() {
   const audits: AuditEntry[] = [];
   const verdicts = new Map<string, SignedVerdict>();
   const events: (StoredEvent & { workspaceId: string })[] = [];
+  const policies = new Map<string, { rules: PolicyRules; updatedAt: string }>();
+  const decisions = new Map<string, DecisionRecord>();
+  const approvals = new Map<string, (ApprovalRecord & { apiKeyId: string })[]>();
 
   const mkKey = (i: Omit<KeyRecord, 'id' | 'createdAt' | 'lastUsedAt' | 'revokedAt'>): KeyRecord => {
     const rec: KeyRecord = { ...i, id: randomUUID(), createdAt: new Date().toISOString(), lastUsedAt: null, revokedAt: null };
@@ -78,6 +82,34 @@ export function memoryStore() {
         .filter((e) => e.workspaceId === workspaceId && Date.parse(e.occurredAt) >= since.getTime() && (!subject || e.subject === subject))
         .slice(0, limit);
     },
+    async getPolicy(workspaceId) {
+      return policies.get(workspaceId) ?? null;
+    },
+    async setPolicy(workspaceId, rules) {
+      const updatedAt = new Date().toISOString();
+      policies.set(workspaceId, { rules: PolicyRules.parse(rules), updatedAt });
+      return { updatedAt };
+    },
+    async insertDecision(rec) {
+      decisions.set(rec.id, { ...rec, status: 'open', createdAt: new Date().toISOString() });
+    },
+    async getDecision(workspaceId, id) {
+      const record = decisions.get(id);
+      if (!record || record.workspaceId !== workspaceId) return null;
+      return { record: { ...record }, approvals: (approvals.get(id) ?? []).map(({ approver, at }) => ({ approver, at })) };
+    },
+    async addApproval(_ws, id, { approver, apiKeyId }) {
+      const list = approvals.get(id) ?? [];
+      if (list.some((a) => a.approver.toLowerCase() === approver.toLowerCase() || a.apiKeyId === apiKeyId)) return 'duplicate';
+      approvals.set(id, [...list, { approver, apiKeyId, at: new Date().toISOString() }]);
+      return 'ok';
+    },
+    async closeDecision(workspaceId, id, status) {
+      const d = decisions.get(id);
+      if (!d || d.workspaceId !== workspaceId || d.status !== 'open') return false;
+      d.status = status;
+      return true;
+    },
   };
-  return { store, usage, audits, verdicts, events };
+  return { store, usage, audits, verdicts, events, decisions };
 }

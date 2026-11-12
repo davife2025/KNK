@@ -117,3 +117,52 @@ Events carry metadata only, never file or code content, and string attributes ar
 **These weights and thresholds are judgement calls, not measurements.** They live in one place so they can be tuned
 against real data. Events accept timestamps up to 30 days old and 5 minutes in the future. The window query reads at
 most 2,000 events per workspace. There is no rate limiting yet.
+
+## Session 5: the signing gate
+
+The signer asks KNK before it signs, and again immediately before it signs.
+
+```bash
+# 1. ask: is this OK to sign?
+curl -X POST localhost:8787/v1/gate/check -H "Authorization: Bearer knk_..." -H "content-type: application/json" \
+  -d '{"subject":"alice@laptop","wallet":"hot-3","tx":{"format":"evm_authorization","chainId":1,"delegate":"0x2222222222222222222222222222222222222222","nonce":0}}'
+# 2. if held: a different person approves (admin key), then wait out the timelock
+curl -X POST localhost:8787/v1/gate/decisions/$ID/approve -H "Authorization: Bearer $ADMIN_KEY" -H "content-type: application/json" -d '{"approver":"carol"}'
+# 3. right before signing: re-send the tx being signed. proceed:true is returned once.
+curl -X POST localhost:8787/v1/gate/decisions/$ID/confirm -H "Authorization: Bearer knk_..." -H "content-type: application/json" -d '{"tx":{...}}'
+```
+
+| Endpoint | Scope | Purpose |
+|---|---|---|
+| `POST /v1/gate/check` | `gate:check` | Decide allow / hold / block; signed decision returned |
+| `GET /v1/gate/decisions/:id` | `gate:check` | Current state and approvals |
+| `POST /v1/gate/decisions/:id/approve` | `admin` | Approve a held decision |
+| `POST /v1/gate/decisions/:id/reject` | `admin` | Reject it for good |
+| `POST /v1/gate/decisions/:id/confirm` | `gate:check` | Final check before signing; single use |
+| `GET /v1/policy`, `PUT /v1/policy` | `gate:check`, `admin` | Read or replace the workspace policy |
+
+**Transaction formats:** `evm_raw` (a serialised transaction, decoded with viem: native transfers, ERC-20
+transfer/transferFrom/approve/increaseAllowance, setApprovalForAll, contract calls and creation, and EIP-7702
+transactions with their authorization lists), `evm_authorization` (a request to sign an EIP-7702 delegation, the
+step that mattered at Binance), and `transfer` (generic structured transfer, e.g. for NEAR). NEAR transactions are
+**not** decoded; a structured `transfer` is judged on its stated destination and amount.
+
+**How a decision is made** (`lib/gate-policy.ts`, pure): the most severe outcome wins. Default policy: undecodable
+input blocks; a delegation to a non-allowlisted contract blocks, and an allowlisted one is still held for approval;
+requester trust `elevated` holds and `critical` blocks; unlimited approvals and unrecognised contract calls hold.
+Optional: destination allowlist, native value limit, per-asset transfer limits. Every hit is returned with a reason.
+
+**Safety properties (each has a test that fails without it):**
+- A hold needs approval, then a timelock (default 15 minutes), and a release is valid for a window.
+- The requester cannot approve their own request. Each approver name and each API key counts once, so two-person
+  approval needs two distinct admin keys.
+- `confirm` re-sends the transaction; the server fingerprints it and compares, so a swapped transaction cannot ride
+  an old approval.
+- A release is single use, enforced atomically, including under simultaneous requests.
+- `confirm` re-checks the requester's trust at the moment of use.
+- Raw transactions are never stored: only a fingerprint and a decoded summary. Decisions are Ed25519-signed.
+
+**Limits to know:** approver names are asserted by the admin key holder and are not authenticated identities (real
+identities arrive with the console and Supabase Auth). A signer that skips `confirm` is not protected; the gate only
+works if the signing service calls it. Policy weights are judgement calls. Unlimited means 2^255 or more. The SQL and
+atomic constraints have been syntax-checked but not run against a live Supabase project.

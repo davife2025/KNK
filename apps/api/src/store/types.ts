@@ -1,4 +1,4 @@
-import type { EventAttrs, EventKind, Scope, SignedVerdict } from '@knk/shared';
+import type { DecodedTx, EventAttrs, EventKind, GateDecisionPayload, GateHit, Outcome, PolicyRules, Scope, SignedVerdict, TrustLevel } from '@knk/shared';
 import type { TrustEvent } from '../lib/trust.js';
 
 export interface KeyRecord {
@@ -45,6 +45,32 @@ export interface NewEvent {
   occurredAt: string;
 }
 
+export interface DecisionRecord {
+  id: string;
+  workspaceId: string;
+  subject: string;
+  wallet: string;
+  decision: Outcome;
+  fingerprint: string;
+  kind: string;
+  summary: DecodedTx | null;
+  hits: GateHit[];
+  trustRisk: number;
+  trustLevel: TrustLevel;
+  approvalsRequired: number;
+  releaseAt: string | null;
+  expiresAt: string | null;
+  status: 'open' | 'rejected' | 'consumed';
+  createdAt: string;
+  payload: GateDecisionPayload;
+  signature: string;
+}
+
+export interface ApprovalRecord {
+  approver: string;
+  at: string;
+}
+
 export interface UsageRow {
   endpoint: string;
   requests: number;
@@ -71,5 +97,13 @@ export interface Store {
   insertVerdict(v: Omit<SignedVerdict, 'alg'>): Promise<void>;
   getVerdict(workspaceId: string, id: string): Promise<SignedVerdict | null>;
   insertEvents(workspaceId: string, events: NewEvent[]): Promise<StoredEvent[]>;
+  getPolicy(workspaceId: string): Promise<{ rules: PolicyRules; updatedAt: string } | null>;
+  setPolicy(workspaceId: string, rules: PolicyRules): Promise<{ updatedAt: string }>;
+  insertDecision(rec: Omit<DecisionRecord, 'status' | 'createdAt'>): Promise<void>;
+  getDecision(workspaceId: string, id: string): Promise<{ record: DecisionRecord; approvals: ApprovalRecord[] } | null>;
+  /** One approval per approver name and per API key, enforced atomically. */
+  addApproval(workspaceId: string, id: string, a: { approver: string; apiKeyId: string }): Promise<'ok' | 'duplicate'>;
+  /** Moves an open decision to rejected or consumed. Returns false if it was not open (so consume is single-use). */
+  closeDecision(workspaceId: string, id: string, status: 'rejected' | 'consumed'): Promise<boolean>;
   listEvents(workspaceId: string, q: { since: Date; subject?: string; limit: number }): Promise<StoredEvent[]>;
 }

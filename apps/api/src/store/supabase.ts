@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { EventKind, Scope, type EventAttrs, type VerdictPayload } from '@knk/shared';
+import { EventKind, PolicyRules, Scope, type EventAttrs, type VerdictPayload } from '@knk/shared';
 import { getSupabase } from '../lib/supabase.js';
-import type { KeyRecord, Store, StoredEvent } from './types.js';
+import type { DecisionRecord, KeyRecord, Store, StoredEvent } from './types.js';
 
 interface KeyRow {
   id: string;
@@ -33,6 +33,48 @@ const toEvents = (rows: EventRow[]): StoredEvent[] =>
       ? [{ id: r.id, subject: r.subject, kind: kind.data, attrs: r.payload ?? {}, occurredAt: r.occurred_at }]
       : [];
   });
+
+interface DecisionRow {
+  id: string;
+  workspace_id: string;
+  subject: string;
+  wallet: string;
+  decision: DecisionRecord['decision'];
+  fingerprint: string;
+  kind: string;
+  summary: DecisionRecord['summary'];
+  hits: DecisionRecord['hits'];
+  trust_risk: number;
+  trust_level: DecisionRecord['trustLevel'];
+  approvals_required: number;
+  release_at: string | null;
+  expires_at: string | null;
+  status: DecisionRecord['status'];
+  created_at: string;
+  payload: DecisionRecord['payload'];
+  signature: string;
+}
+
+const toDecision = (r: DecisionRow): DecisionRecord => ({
+  id: r.id,
+  workspaceId: r.workspace_id,
+  subject: r.subject,
+  wallet: r.wallet,
+  decision: r.decision,
+  fingerprint: r.fingerprint,
+  kind: r.kind,
+  summary: r.summary,
+  hits: r.hits,
+  trustRisk: r.trust_risk,
+  trustLevel: r.trust_level,
+  approvalsRequired: r.approvals_required,
+  releaseAt: r.release_at,
+  expiresAt: r.expires_at,
+  status: r.status,
+  createdAt: r.created_at,
+  payload: r.payload,
+  signature: r.signature,
+});
 
 const toKey = (r: KeyRow): KeyRecord => ({
   id: r.id,
@@ -205,6 +247,83 @@ export function createSupabaseStore(client: () => SupabaseClient = getSupabase):
       const { data, error } = await q.order('occurred_at', { ascending: false }).limit(limit);
       if (error) throw error;
       return toEvents(data as EventRow[]);
+    },
+
+    async getPolicy(workspaceId) {
+      const { data, error } = await client()
+        .from('policies')
+        .select('rules,updated_at')
+        .eq('workspace_id', workspaceId)
+        .eq('name', 'default')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const rules = PolicyRules.safeParse((data as { rules: unknown }).rules);
+      return rules.success ? { rules: rules.data, updatedAt: (data as { updated_at: string }).updated_at } : null;
+    },
+
+    async setPolicy(workspaceId, rules) {
+      const updatedAt = new Date().toISOString();
+      const { error } = await client()
+        .from('policies')
+        .upsert({ workspace_id: workspaceId, name: 'default', rules, enabled: true, updated_at: updatedAt }, { onConflict: 'workspace_id,name' });
+      if (error) throw error;
+      return { updatedAt };
+    },
+
+    async insertDecision(r) {
+      const { error } = await client().from('gate_decisions').insert({
+        id: r.id,
+        workspace_id: r.workspaceId,
+        subject: r.subject,
+        wallet: r.wallet,
+        decision: r.decision,
+        fingerprint: r.fingerprint,
+        kind: r.kind,
+        summary: r.summary,
+        hits: r.hits,
+        trust_risk: r.trustRisk,
+        trust_level: r.trustLevel,
+        approvals_required: r.approvalsRequired,
+        release_at: r.releaseAt,
+        expires_at: r.expiresAt,
+        payload: r.payload,
+        signature: r.signature,
+      });
+      if (error) throw error;
+    },
+
+    async getDecision(workspaceId, id) {
+      const { data, error } = await client().from('gate_decisions').select('*').eq('id', id).eq('workspace_id', workspaceId).maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const { data: rows, error: e2 } = await client()
+        .from('gate_approvals')
+        .select('approver,created_at')
+        .eq('decision_id', id)
+        .order('created_at', { ascending: true });
+      if (e2) throw e2;
+      const approvals = (rows as { approver: string; created_at: string }[]).map((a) => ({ approver: a.approver, at: a.created_at }));
+      return { record: toDecision(data as DecisionRow), approvals };
+    },
+
+    async addApproval(_workspaceId, id, { approver, apiKeyId }) {
+      const { error } = await client().from('gate_approvals').insert({ decision_id: id, approver, api_key_id: apiKeyId });
+      if (error?.code === '23505') return 'duplicate'; // unique violation
+      if (error) throw error;
+      return 'ok';
+    },
+
+    async closeDecision(workspaceId, id, status) {
+      const { data, error } = await client()
+        .from('gate_decisions')
+        .update({ status, consumed_at: status === 'consumed' ? new Date().toISOString() : null })
+        .eq('id', id)
+        .eq('workspace_id', workspaceId)
+        .eq('status', 'open')
+        .select('id');
+      if (error) throw error;
+      return (data?.length ?? 0) > 0;
     },
   };
 }

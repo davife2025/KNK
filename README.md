@@ -83,3 +83,37 @@ model-backed) are placeholders in `routes/analyze.ts`.
 
 **Not yet verified:** the live Hugging Face call (tested against a mocked endpoint only) and the SQL against a real
 Supabase project. Confirm the Kimi model id with `GET https://router.huggingface.co/v1/models`.
+
+## Session 4: events and trust
+
+```bash
+curl -X POST localhost:8787/v1/events -H "Authorization: Bearer knk_..." -H "content-type: application/json" \
+  -d '{"events":[{"subject":"alice@laptop","kind":"credential_read","attrs":{"target":"ssh"}}]}'
+curl localhost:8787/v1/subjects/alice%40laptop/trust -H "Authorization: Bearer knk_..."
+```
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /v1/events` | `events:write` | Ingest up to 100 events; returns each subject's trust state |
+| `GET /v1/trust` | `gate:check` | All subjects in the window, riskiest first |
+| `GET /v1/subjects/:subject/trust` | `gate:check` | One subject's trust state with reasons |
+| `POST /v1/analyze` + `"subject"` | `analyze` | Also records the verdict as an event and returns trust |
+
+Event kinds map to kill-chain stages (see `EVENT_STAGE` in `@knk/shared`): `untrusted_repo_opened`,
+`install_script_executed`, `unverified_installer_used`, `artifact_verdict` (initial access);
+`credential_read`, `deploy_token_on_disk` (credential access); `ai_tool_permission_change`,
+`ai_tool_cross_host_action` (privilege escalation); `signing_request` (signing path, neutral on its own).
+Events carry metadata only, never file or code content, and string attributes are redacted anyway.
+
+**How trust is computed** (`apps/api/src/lib/trust.ts`, pure and deterministic, computed on read from raw events):
+
+1. Each event has a base weight (a malicious verdict 55, a wallet or deploy-token read 35, a routine install script 10).
+2. Weight halves every 72 hours and drops out after 14 days.
+3. If events form a chain with strictly increasing stages over time (initial access, then credential access, then
+   privilege escalation), a bonus is added: +10 for two stages, +25 for three, itself faded by the chain's freshness.
+4. Risk is the sum, capped at 100: below 25 normal, 25-49 watch, 50-74 elevated, 75+ critical.
+5. Every state lists its contributions and plain-English reasons.
+
+**These weights and thresholds are judgement calls, not measurements.** They live in one place so they can be tuned
+against real data. Events accept timestamps up to 30 days old and 5 minutes in the future. The window query reads at
+most 2,000 events per workspace. There is no rate limiting yet.

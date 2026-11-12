@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Scope, type VerdictPayload } from '@knk/shared';
+import { EventKind, Scope, type EventAttrs, type VerdictPayload } from '@knk/shared';
 import { getSupabase } from '../lib/supabase.js';
-import type { KeyRecord, Store } from './types.js';
+import type { KeyRecord, Store, StoredEvent } from './types.js';
 
 interface KeyRow {
   id: string;
@@ -17,6 +17,22 @@ interface KeyRow {
 
 const validScopes = (raw: string[]): Scope[] =>
   raw.filter((s): s is Scope => Scope.safeParse(s).success);
+
+interface EventRow {
+  id: string;
+  subject: string;
+  kind: string;
+  payload: EventAttrs | null;
+  occurred_at: string;
+}
+
+const toEvents = (rows: EventRow[]): StoredEvent[] =>
+  rows.flatMap((r) => {
+    const kind = EventKind.safeParse(r.kind); // tolerate kinds added by newer versions
+    return kind.success
+      ? [{ id: r.id, subject: r.subject, kind: kind.data, attrs: r.payload ?? {}, occurredAt: r.occurred_at }]
+      : [];
+  });
 
 const toKey = (r: KeyRow): KeyRecord => ({
   id: r.id,
@@ -160,6 +176,35 @@ export function createSupabaseStore(client: () => SupabaseClient = getSupabase):
       if (error) throw error;
       const row = data as { payload: VerdictPayload; signature: string } | null;
       return row ? { payload: row.payload, signature: row.signature, alg: 'Ed25519' } : null;
+    },
+
+    async insertEvents(workspaceId, events) {
+      const { data, error } = await client()
+        .from('events')
+        .insert(
+          events.map((e) => ({
+            workspace_id: workspaceId,
+            subject: e.subject,
+            kind: e.kind,
+            payload: e.attrs,
+            occurred_at: e.occurredAt,
+          })),
+        )
+        .select('id,subject,kind,payload,occurred_at');
+      if (error) throw error;
+      return toEvents(data as EventRow[]);
+    },
+
+    async listEvents(workspaceId, { since, subject, limit }) {
+      let q = client()
+        .from('events')
+        .select('id,subject,kind,payload,occurred_at')
+        .eq('workspace_id', workspaceId)
+        .gte('occurred_at', since.toISOString());
+      if (subject) q = q.eq('subject', subject);
+      const { data, error } = await q.order('occurred_at', { ascending: false }).limit(limit);
+      if (error) throw error;
+      return toEvents(data as EventRow[]);
     },
   };
 }

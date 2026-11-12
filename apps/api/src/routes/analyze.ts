@@ -9,6 +9,7 @@ import {
   type VerdictPayload,
 } from '@knk/shared';
 import { analyzeArtifact } from '../lib/analyzer.js';
+import { trustSnapshot } from '../lib/trust-service.js';
 import { apiError } from '../lib/errors.js';
 import { getDefaultLlm, type LlmProvider } from '../lib/llm.js';
 import { getDefaultSigner, type VerdictSigner } from '../lib/signing.js';
@@ -71,7 +72,7 @@ export function analyzeRoutes(deps: AnalyzeDeps): Hono<AppEnv> {
       if (!signer) return apiError(c, 503, 'signing_not_configured', 'Verdict signing is not configured');
       const llm = deps.llm === undefined ? getDefaultLlm() : deps.llm;
 
-      const { kind, content } = body.data;
+      const { kind, content, subject } = body.data;
       const result = await analyzeArtifact({ kind, content, llm });
       const auth = c.get('auth');
 
@@ -92,6 +93,19 @@ export function analyzeRoutes(deps: AnalyzeDeps): Hono<AppEnv> {
       const signature = signer.sign(payload);
       await store.insertVerdict({ payload, signature });
 
+      let trust: AnalyzeResponse['trust'];
+      if (subject) {
+        await store.insertEvents(auth.workspaceId, [
+          {
+            subject,
+            kind: 'artifact_verdict',
+            attrs: { verdictId: payload.id, verdict: payload.verdict, riskScore: payload.riskScore, artifactKind: kind },
+            occurredAt: payload.issuedAt,
+          },
+        ]);
+        [trust] = await trustSnapshot(store, auth.workspaceId, { subjects: [subject] });
+      }
+
       c.set('units', UNITS[result.mode]);
       const out: AnalyzeResponse = {
         payload,
@@ -99,6 +113,7 @@ export function analyzeRoutes(deps: AnalyzeDeps): Hono<AppEnv> {
         alg: 'Ed25519',
         redactions: result.redactions,
         warnings: result.warnings,
+        ...(trust ? { trust } : {}),
       };
       return c.json(out);
     },

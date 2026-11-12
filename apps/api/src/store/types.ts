@@ -1,4 +1,5 @@
-import type { Scope, SignedVerdict } from '@knk/shared';
+import type { EventAttrs, EventKind, Scope, SignedVerdict } from '@knk/shared';
+import type { TrustEvent } from '../lib/trust.js';
 
 export interface KeyRecord {
   id: string;
@@ -35,6 +36,15 @@ export interface UsageRecord {
   units: number;
 }
 
+export type StoredEvent = TrustEvent;
+
+export interface NewEvent {
+  subject: string;
+  kind: EventKind;
+  attrs: EventAttrs;
+  occurredAt: string;
+}
+
 export interface UsageRow {
   endpoint: string;
   requests: number;
@@ -60,4 +70,6 @@ export interface Store {
   audit(entry: AuditEntry): Promise<void>;
   insertVerdict(v: Omit<SignedVerdict, 'alg'>): Promise<void>;
   getVerdict(workspaceId: string, id: string): Promise<SignedVerdict | null>;
+  insertEvents(workspaceId: string, events: NewEvent[]): Promise<StoredEvent[]>;
+  listEvents(workspaceId: string, q: { since: Date; subject?: string; limit: number }): Promise<StoredEvent[]>;
 }

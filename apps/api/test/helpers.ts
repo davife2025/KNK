@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SignedVerdict } from '@knk/shared';
-import type { KeyRecord, Store, UsageRecord, UsageRow, AuditEntry } from '../src/store/types.js';
+import type { KeyRecord, Store, StoredEvent, UsageRecord, UsageRow, AuditEntry } from '../src/store/types.js';
 
 /** In-memory Store so route and auth behaviour can be tested without Supabase. */
 export function memoryStore() {
@@ -9,6 +9,7 @@ export function memoryStore() {
   const usage: UsageRecord[] = [];
   const audits: AuditEntry[] = [];
   const verdicts = new Map<string, SignedVerdict>();
+  const events: (StoredEvent & { workspaceId: string })[] = [];
 
   const mkKey = (i: Omit<KeyRecord, 'id' | 'createdAt' | 'lastUsedAt' | 'revokedAt'>): KeyRecord => {
     const rec: KeyRecord = { ...i, id: randomUUID(), createdAt: new Date().toISOString(), lastUsedAt: null, revokedAt: null };
@@ -67,6 +68,16 @@ export function memoryStore() {
       const v = verdicts.get(id);
       return v && v.payload.workspaceId === workspaceId ? v : null;
     },
+    async insertEvents(workspaceId, list) {
+      const stored = list.map((e) => ({ ...e, id: randomUUID(), workspaceId }));
+      events.push(...stored);
+      return stored;
+    },
+    async listEvents(workspaceId, { since, subject, limit }) {
+      return events
+        .filter((e) => e.workspaceId === workspaceId && Date.parse(e.occurredAt) >= since.getTime() && (!subject || e.subject === subject))
+        .slice(0, limit);
+    },
   };
-  return { store, usage, audits, verdicts };
+  return { store, usage, audits, verdicts, events };
 }

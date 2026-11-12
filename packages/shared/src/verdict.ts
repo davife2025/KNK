@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TrustState } from './events.js';
 
 export const Severity = z.enum(['info', 'low', 'medium', 'high', 'critical']);
 export type Severity = z.infer<typeof Severity>;
@@ -22,6 +23,8 @@ export type Finding = z.infer<typeof Finding>;
 export const AnalyzeRequest = z.object({
   kind: ArtifactKind,
   content: z.string().min(1).max(40_000),
+  /** If given, the verdict is also recorded as an event for this person/device, and their trust state is returned. */
+  subject: z.string().trim().min(1).max(120).optional(),
 });
 export type AnalyzeRequest = z.infer<typeof AnalyzeRequest>;
 
@@ -56,6 +59,7 @@ export type SignedVerdict = z.infer<typeof SignedVerdict>;
 export const AnalyzeResponse = SignedVerdict.extend({
   redactions: z.array(z.object({ type: z.string(), count: z.number() })),
   warnings: z.array(z.string()),
+  trust: TrustState.optional(),
 });
 export type AnalyzeResponse = z.infer<typeof AnalyzeResponse>;
 

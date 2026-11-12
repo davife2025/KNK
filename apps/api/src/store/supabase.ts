@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Scope } from '@knk/shared';
+import { Scope, type VerdictPayload } from '@knk/shared';
 import { getSupabase } from '../lib/supabase.js';
 import type { KeyRecord, Store } from './types.js';
 
@@ -128,6 +128,38 @@ export function createSupabaseStore(client: () => SupabaseClient = getSupabase):
         .from('audit_log')
         .insert({ workspace_id: workspaceId, actor, action, target: target ?? null, meta: meta ?? {} });
       if (error) throw error;
+    },
+
+    async insertVerdict({ payload, signature }) {
+      // Only the hash of the analysed artifact is stored, never its content.
+      const { error } = await client().from('verdicts').insert({
+        id: payload.id,
+        workspace_id: payload.workspaceId,
+        outcome: payload.verdict,
+        summary: payload.summary,
+        model: payload.model,
+        key_id: payload.keyId,
+        signature,
+        kind: payload.kind,
+        artifact_sha256: payload.artifactSha256,
+        risk_score: payload.riskScore,
+        findings: payload.findings,
+        mode: payload.mode,
+        payload,
+      });
+      if (error) throw error;
+    },
+
+    async getVerdict(workspaceId, id) {
+      const { data, error } = await client()
+        .from('verdicts')
+        .select('payload,signature')
+        .eq('id', id)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle();
+      if (error) throw error;
+      const row = data as { payload: VerdictPayload; signature: string } | null;
+      return row ? { payload: row.payload, signature: row.signature, alg: 'Ed25519' } : null;
     },
   };
 }

@@ -1,4 +1,4 @@
-import type { Scope } from '@knk/shared';
+import type { Scope, SignedVerdict } from '@knk/shared';
 
 export interface KeyRecord {
   id: string;
@@ -58,4 +58,6 @@ export interface Store {
   recordUsage(rec: UsageRecord): Promise<void>;
   usageSummary(workspaceId: string, since: Date): Promise<UsageRow[]>;
   audit(entry: AuditEntry): Promise<void>;
+  insertVerdict(v: Omit<SignedVerdict, 'alg'>): Promise<void>;
+  getVerdict(workspaceId: string, id: string): Promise<SignedVerdict | null>;
 }

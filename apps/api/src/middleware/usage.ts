@@ -14,7 +14,7 @@ export function meterUsage(store: Store): MiddlewareHandler<AppEnv> {
         workspaceId: auth.workspaceId,
         apiKeyId: auth.apiKeyId,
         endpoint: `${c.req.method} ${routePath(c)}`,
-        units: 1,
+        units: (c.get('units') as number | undefined) ?? 1,
       })
       .catch((e) => console.error('recordUsage', e));
   };

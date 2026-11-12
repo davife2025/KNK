@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { SignedVerdict } from '@knk/shared';
 import type { KeyRecord, Store, UsageRecord, UsageRow, AuditEntry } from '../src/store/types.js';
 
 /** In-memory Store so route and auth behaviour can be tested without Supabase. */
@@ -7,6 +8,7 @@ export function memoryStore() {
   const keys = new Map<string, KeyRecord>();
   const usage: UsageRecord[] = [];
   const audits: AuditEntry[] = [];
+  const verdicts = new Map<string, SignedVerdict>();
 
   const mkKey = (i: Omit<KeyRecord, 'id' | 'createdAt' | 'lastUsedAt' | 'revokedAt'>): KeyRecord => {
     const rec: KeyRecord = { ...i, id: randomUUID(), createdAt: new Date().toISOString(), lastUsedAt: null, revokedAt: null };
@@ -58,6 +60,13 @@ export function memoryStore() {
     async audit(entry) {
       audits.push(entry);
     },
+    async insertVerdict(v) {
+      verdicts.set(v.payload.id, { ...v, alg: 'Ed25519' });
+    },
+    async getVerdict(workspaceId, id) {
+      const v = verdicts.get(id);
+      return v && v.payload.workspaceId === workspaceId ? v : null;
+    },
   };
-  return { store, usage, audits };
+  return { store, usage, audits, verdicts };
 }

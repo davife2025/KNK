@@ -10,7 +10,7 @@ export interface AuthContext {
   keyPrefix: string;
   scopes: Scope[];
 }
-export type AppEnv = { Variables: { auth: AuthContext } };
+export type AppEnv = { Variables: { auth: AuthContext; units?: number } };
 
 const TOUCH_INTERVAL_MS = 60_000;
 

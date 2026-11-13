@@ -1,0 +1,17 @@
+{
+  "name": "@knk/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "knk": "./dist/bin.js" },
+  "main": "./dist/lib.js",
+  "types": "./dist/lib.d.ts",
+  "exports": { ".": { "types": "./dist/lib.d.ts", "default": "./dist/lib.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/bin.js', 0o755)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": { "@knk/detect": "workspace:*", "@knk/shared": "workspace:*", "zod": "^4.6.7" },
+  "devDependencies": { "@types/node": "^26.6.6", "vitest": "^5.1.0" }
+}

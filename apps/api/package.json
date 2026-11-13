@@ -8,16 +8,22 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "keygen": "tsx src/scripts/keygen.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
+    "@knk/detect": "workspace:*",
+    "@knk/guard": "workspace:*",
     "@knk/shared": "workspace:*",
     "@supabase/supabase-js": "^2.119.0",
     "hono": "^4.13.17",
+    "undici": "^8.12.4",
+    "viem": "^2.57.17",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@knk/cli": "workspace:*",
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "vitest": "^5.1.0"

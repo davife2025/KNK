@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { EventKind, PolicyRules, Scope, type EventAttrs, type VerdictPayload } from '@knk/shared';
 import { getSupabase } from '../lib/supabase.js';
-import type { DecisionRecord, KeyRecord, Store, StoredEvent } from './types.js';
+import type { DecisionRecord, KeyRecord, Store, StoredEvent, WebhookRecord } from './types.js';
+import type { Playbook, ResponseRun } from '@knk/shared';
 
 interface KeyRow {
   id: string;
@@ -75,6 +76,45 @@ const toDecision = (r: DecisionRow): DecisionRecord => ({
   payload: r.payload,
   signature: r.signature,
 });
+
+interface WebhookRow {
+  id: string;
+  workspace_id: string;
+  url: string;
+  description: string | null;
+  secret_enc: string;
+  created_at: string;
+}
+const toWebhook = (r: WebhookRow): WebhookRecord => ({ id: r.id, workspaceId: r.workspace_id, url: r.url, description: r.description, secretEnc: r.secret_enc, createdAt: r.created_at });
+
+interface PlaybookRow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  triggers: Playbook['triggers'];
+  subjects: string[];
+  webhook_id: string;
+  kind: Playbook['kind'];
+  agent_ids: string[];
+  cooldown_seconds: number;
+  created_at: string;
+}
+const toPlaybook = (r: PlaybookRow): Playbook => ({ id: r.id, name: r.name, enabled: r.enabled, triggers: r.triggers, subjects: r.subjects, webhookId: r.webhook_id, kind: r.kind, agentIds: r.agent_ids, cooldownSeconds: r.cooldown_seconds, createdAt: r.created_at });
+
+interface RunRow {
+  id: string;
+  playbook_id: string | null;
+  webhook_id: string | null;
+  trigger: string;
+  subject: string;
+  event_type: string;
+  status: ResponseRun['status'];
+  attempts: number;
+  http_status: number | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
 
 const toKey = (r: KeyRow): KeyRecord => ({
   id: r.id,
@@ -324,6 +364,86 @@ export function createSupabaseStore(client: () => SupabaseClient = getSupabase):
         .select('id');
       if (error) throw error;
       return (data?.length ?? 0) > 0;
+    },
+
+    async insertWebhook({ workspaceId, url, description, secretEnc }) {
+      const { data, error } = await client().from('webhooks').insert({ workspace_id: workspaceId, url, description, secret_enc: secretEnc }).select('*').single();
+      if (error) throw error;
+      return toWebhook(data as WebhookRow);
+    },
+    async listWebhooks(workspaceId) {
+      const { data, error } = await client().from('webhooks').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data as WebhookRow[]).map(toWebhook);
+    },
+    async getWebhook(workspaceId, id) {
+      const { data, error } = await client().from('webhooks').select('*').eq('workspace_id', workspaceId).eq('id', id).maybeSingle();
+      if (error) throw error;
+      return data ? toWebhook(data as WebhookRow) : null;
+    },
+    async deleteWebhook(workspaceId, id) {
+      const { data, error } = await client().from('webhooks').delete().eq('workspace_id', workspaceId).eq('id', id).select('id');
+      if (error) throw error;
+      return (data?.length ?? 0) > 0; // playbooks go with it (on delete cascade)
+    },
+    async insertPlaybook(p) {
+      const { data, error } = await client()
+        .from('playbooks')
+        .insert({ workspace_id: p.workspaceId, name: p.name, triggers: p.triggers, subjects: p.subjects, webhook_id: p.webhookId, kind: p.kind, agent_ids: p.agentIds, cooldown_seconds: p.cooldownSeconds })
+        .select('*')
+        .single();
+      if (error) throw error;
+      return toPlaybook(data as PlaybookRow);
+    },
+    async listPlaybooks(workspaceId) {
+      const { data, error } = await client().from('playbooks').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data as PlaybookRow[]).map(toPlaybook);
+    },
+    async deletePlaybook(workspaceId, id) {
+      const { data, error } = await client().from('playbooks').delete().eq('workspace_id', workspaceId).eq('id', id).select('id');
+      if (error) throw error;
+      return (data?.length ?? 0) > 0;
+    },
+    async hasRecentRun(workspaceId, playbookId, subject, trigger, since) {
+      const { data, error } = await client()
+        .from('response_runs')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('playbook_id', playbookId)
+        .eq('trigger', trigger)
+        .ilike('subject', subject.replace(/[\\%_]/g, (m) => `\\${m}`))
+        .in('status', ['pending', 'delivered'])
+        .gte('created_at', since.toISOString())
+        .limit(1);
+      if (error) throw error;
+      return (data?.length ?? 0) > 0;
+    },
+    async insertRun(r) {
+      const { error } = await client().from('response_runs').insert({
+        id: r.id,
+        workspace_id: r.workspaceId,
+        playbook_id: r.playbookId,
+        webhook_id: r.webhookId,
+        trigger: r.trigger,
+        subject: r.subject,
+        event_type: r.eventType,
+        payload: r.payload,
+      });
+      if (error) throw error;
+    },
+    async finishRun(workspaceId, id, r) {
+      const { error } = await client()
+        .from('response_runs')
+        .update({ status: r.ok ? 'delivered' : 'failed', attempts: r.attempts, http_status: r.httpStatus, error: r.error, finished_at: new Date().toISOString() })
+        .eq('workspace_id', workspaceId)
+        .eq('id', id);
+      if (error) throw error;
+    },
+    async listRuns(workspaceId, limit) {
+      const { data, error } = await client().from('response_runs').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(limit);
+      if (error) throw error;
+      return (data as RunRow[]).map((r) => ({ id: r.id, playbookId: r.playbook_id, webhookId: r.webhook_id, trigger: r.trigger, subject: r.subject, eventType: r.event_type, status: r.status, attempts: r.attempts, httpStatus: r.http_status, error: r.error, createdAt: r.created_at, finishedAt: r.finished_at }));
     },
   };
 }

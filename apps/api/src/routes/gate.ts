@@ -16,6 +16,7 @@ import { apiError } from '../lib/errors.js';
 import { decodeTx, fingerprintTx } from '../lib/evm.js';
 import { evaluateGate } from '../lib/gate-policy.js';
 import { decisionState } from '../lib/gate-state.js';
+import type { ResponseEngine } from '../lib/response.js';
 import { getDefaultSigner, type VerdictSigner } from '../lib/signing.js';
 import { trustSnapshot } from '../lib/trust-service.js';
 import { requireApiKey, requireScope, type AppEnv } from '../middleware/auth.js';
@@ -27,7 +28,7 @@ const ALLOW_TTL_SECONDS = 300; // an immediate "allow" must be used within 5 min
 const issues = (e: { issues: { path: PropertyKey[]; message: string }[] }) =>
   e.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ');
 
-export function gateRoutes(deps: { store: Store; signer?: VerdictSigner | null }): Hono<AppEnv> {
+export function gateRoutes(deps: { store: Store; engine: ResponseEngine; signer?: VerdictSigner | null }): Hono<AppEnv> {
   const { store } = deps;
   const r = new Hono<AppEnv>();
   for (const path of ['/v1/gate/*', '/v1/policy']) r.use(path, requireApiKey(store), meterUsage(store));
@@ -132,6 +133,17 @@ export function gateRoutes(deps: { store: Store; signer?: VerdictSigner | null }
     await store.insertEvents(workspaceId, [
       { subject, kind: 'signing_request', attrs: { wallet, format: tx.format, kind: payload.kind, decision: payload.decision }, occurredAt: payload.issuedAt },
     ]);
+    if (payload.decision !== 'allow') {
+      deps.engine.fire(workspaceId, payload.decision === 'block' ? 'gate.blocked' : 'gate.held', subject, {
+        decisionId: payload.id,
+        wallet,
+        kind: payload.kind,
+        trustLevel: payload.trustLevel,
+        trustRisk: payload.trustRisk,
+        rules: payload.rules,
+        reasons: evaluation.hits.map((h) => h.reason),
+      });
+    }
     return c.json(view({ ...rec, status: 'open', createdAt: payload.issuedAt }, [], now));
   });
 

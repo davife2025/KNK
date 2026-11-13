@@ -1,0 +1,10 @@
+export { main, VERSION, type Io } from './cli.js';
+export { ApiFailure, createClient, type KnkClient } from './client.js';
+export { assertSafeApiUrl, configPath, loadConfig, saveConfig, type Config } from './config.js';
+export { detect, parseJsonc, scriptFiles, type Candidate, type Detection, type LocalFinding } from './detectors.js';
+export { CliError } from './errors.js';
+export { readTextSafe, walk } from './fsutil.js';
+export { scanMachine } from './machine.js';
+export { renderGate, renderScan, renderStatus } from './report.js';
+export { safe } from './sanitize.js';
+export { runScan, type ScanOptions, type ScanResult } from './scan.js';

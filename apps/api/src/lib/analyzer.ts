@@ -2,8 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { Severity, type ArtifactKind, type Finding, type VerdictLabel } from '@knk/shared';
 import type { LlmProvider } from './llm.js';
-import { redact, type Redaction } from './redact.js';
-import { runStaticAnalysis } from './static-analysis.js';
+import { labelFor, redact, runStaticAnalysis, type Redaction } from '@knk/detect';
 
 const trim = (n: number) => z.string().transform((s) => s.slice(0, n));
 const ModelAnalysis = z.object({
@@ -41,8 +40,6 @@ async function askModel(llm: LlmProvider, kind: ArtifactKind, redacted: string):
   }
   return null;
 }
-
-export const labelFor = (score: number): VerdictLabel => (score >= 80 ? 'malicious' : score >= 30 ? 'suspicious' : 'benign');
 
 export interface AnalysisResult {
   verdict: VerdictLabel;

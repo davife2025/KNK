@@ -9,6 +9,7 @@ import {
   type VerdictPayload,
 } from '@knk/shared';
 import { analyzeArtifact } from '../lib/analyzer.js';
+import { fireTrustCritical, type ResponseEngine } from '../lib/response.js';
 import { trustSnapshot } from '../lib/trust-service.js';
 import { apiError } from '../lib/errors.js';
 import { getDefaultLlm, type LlmProvider } from '../lib/llm.js';
@@ -22,6 +23,7 @@ const UNITS = { static_only: 1, 'static+model': 5 } as const;
 
 export interface AnalyzeDeps {
   store: Store;
+  engine: ResponseEngine;
   /** undefined = resolve from env, null = no model. */
   llm?: LlmProvider | null;
   /** undefined = resolve from env, null = signing unavailable. */
@@ -95,6 +97,7 @@ export function analyzeRoutes(deps: AnalyzeDeps): Hono<AppEnv> {
 
       let trust: AnalyzeResponse['trust'];
       if (subject) {
+        const before = await trustSnapshot(store, auth.workspaceId, { subjects: [subject] });
         await store.insertEvents(auth.workspaceId, [
           {
             subject,
@@ -104,6 +107,15 @@ export function analyzeRoutes(deps: AnalyzeDeps): Hono<AppEnv> {
           },
         ]);
         [trust] = await trustSnapshot(store, auth.workspaceId, { subjects: [subject] });
+        fireTrustCritical(deps.engine, auth.workspaceId, before, trust ? [trust] : []);
+      }
+      if (payload.verdict === 'malicious') {
+        deps.engine.fire(auth.workspaceId, 'verdict.malicious', subject ?? '(none)', {
+          verdictId: payload.id,
+          riskScore: payload.riskScore,
+          artifactKind: kind,
+          reasons: payload.findings.slice(0, 5).map((f) => f.title),
+        });
       }
 
       c.set('units', UNITS[result.mode]);

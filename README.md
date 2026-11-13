@@ -166,3 +166,84 @@ Optional: destination allowlist, native value limit, per-asset transfer limits. 
 identities arrive with the console and Supabase Auth). A signer that skips `confirm` is not protected; the gate only
 works if the signing service calls it. Policy weights are judgement calls. Unlimited means 2^255 or more. The SQL and
 atomic constraints have been syntax-checked but not run against a live Supabase project.
+
+## Session 6: response (webhooks, playbooks, containment)
+
+KNK turns incidents into **signed webhooks**. It does not freeze anything itself: see `docs/agent-guard.md` for why
+(on the NEAR Intents Agent API the owner's wallet signs a freeze) and for the customer-side receiver.
+
+| Endpoint (all `admin`) | Purpose |
+|---|---|
+| `POST /v1/webhooks` | Register an HTTPS endpoint. Returns the signing secret once |
+| `GET /v1/webhooks`, `DELETE /v1/webhooks/:id` | List (never shows secrets), delete (its playbooks go too) |
+| `POST /v1/webhooks/:id/test` | Send a signed `webhook.test` now and report the result |
+| `POST /v1/playbooks`, `GET /v1/playbooks`, `DELETE /v1/playbooks/:id` | When X happens, notify or contain |
+| `GET /v1/responses` | Delivery log: status, attempts, HTTP status, error |
+
+**Triggers:** `trust.critical` (only on the transition into critical), `gate.blocked`, `gate.held`,
+`verdict.malicious`. A playbook of kind `alert` sends that event; kind `containment` sends `containment.requested`
+with the agent ids to cut off. Optional subject filter (case-insensitive) and a cooldown (default 10 minutes) per
+playbook, subject and trigger. A failed delivery does not start a cooldown, so the next incident retries.
+
+**Delivery:** `POST` with `knk-signature: t=<unix>,v1=<HMAC-SHA256 of "t.body">`, `knk-event`, `knk-delivery`.
+Retried on timeouts, 5xx, 408 and 429 (3 attempts, 1s then 4s); 4xx and redirects are final. Delivery runs in the
+background, so a slow receiver can never delay ingestion or a signing decision. Verify with `@knk/guard`.
+
+**Security properties (each has a test that fails without it):**
+- **SSRF:** https only; no credentials in URLs; private, loopback, link-local (cloud metadata), multicast and reserved
+  addresses refused, including IPv4-mapped IPv6 and decimal/hex literals. Checked at registration, before each
+  delivery, and again at connect time (defeats DNS rebinding). Redirects are never followed.
+- Signing secrets are encrypted at rest (AES-256-GCM) and shown once. They cannot be hashed because KNK must sign with them.
+- The webhook payload carries no agent credentials, because KNK has none.
+- `KNK_ALLOW_PRIVATE_WEBHOOKS` (dev only) makes the API refuse to start in production.
+
+**Limits:** deliveries run in-process, so a crash mid-delivery can leave a run `pending` and a restart does not resume
+it (no durable queue yet). The cooldown is checked then written, so two simultaneous identical incidents could both
+send. The SQL (including the cascade and the encrypted secret column) is syntax-checked, not run on a live Supabase.
+
+## Session 7: the KNK CLI (`apps/cli`)
+
+```bash
+export KNK_API_KEY=knk_...            # never a flag: flags end up in shell history
+knk init --api-url https://your-knk-host --subject alice@laptop
+knk scan ./coding-test --untrusted    # read-only; nothing in the repo is executed
+knk gate check hot-wallet-3 --raw "$TX"
+knk status
+```
+
+| Command | What it does | Exit codes |
+|---|---|---|
+| `knk init` | Verifies your key, stores config owner-only (`~/.config/knk/config.json`, mode 600). Key from `KNK_API_KEY` or `--key-stdin` only | 0 / 1 |
+| `knk scan [path]` | Finds code that runs on its own, reviews it, prints findings | 0 clean, 2 suspicious, 3 malicious |
+| `knk gate check <wallet>` | `--raw HEX`, `--delegate ADDR`, or `--transfer TO --amount N --asset SYM` | 0 allow, 4 hold, 5 block |
+| `knk status` | Workspace, scopes and your trust state | 0 |
+
+`scan` flags: `--untrusted` (records that this repo came from outside the team), `--offline` (nothing leaves the
+machine; local checks only), `--machine` (also list well-known credential files, names and permissions only),
+`--report-tokens` (with `--machine`: send ONE summary event of credential types, opt-in), `--max-send N`, `--json`.
+Without configuration, `scan` still runs, local-only.
+
+**What it looks for** (`src/detectors.ts`): npm lifecycle scripts and the files they run; installer-named files and
+`setup.py`; git hooks and git config entries that can run commands (git-lfs filters excluded); VS Code tasks set to
+run on folder open; dev container commands (host-side `initializeCommand` is rated higher); AI tool configs
+(`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, `.claude/settings*.json`) and assistant instruction files
+(`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.github/copilot-instructions.md`) that try to override the assistant;
+secrets in the repo (type and count only); symlinks that leave the repo.
+
+**Safe to point at a hostile repository (each property has a test that fails without it):**
+- Read-only. Never executes, installs or modifies anything.
+- Never follows symlinks, including symlinked parent directories such as a `.git` that points elsewhere. FIFOs,
+  devices and binaries are skipped. A script reference that leaves the repo is flagged, not read.
+- Every untrusted string is stripped of terminal escapes, bidi controls and zero-width characters before printing.
+- **Minimal disclosure:** only code that runs on its own, or anything already suspicious, is sent, and only after
+  redaction. For a manifest, only the lifecycle scripts go, not the whole file. `.env` contents, secrets and anything
+  behind a symlink are never sent.
+- The API URL must be https (http only for localhost), redirects are never followed, and the key is never echoed.
+- `--machine` results are shown locally. They are **not** sent unless you pass `--report-tokens`, because ordinary
+  developers legitimately have these files and reporting each would raise everyone's trust score.
+
+**Limits:** detection is heuristic and name-based. The AI-tool file names and the VS Code and dev container keys come
+from my knowledge of those tools' current conventions and may be incomplete or out of date, so check them against
+the tools your team uses. A clean scan is not proof of safety. The CLI is advisory: it cannot stop you running
+something. The subject defaults to `username@hostname`, which is sent to KNK; set `--subject` if that is a concern.
+Not tested on Windows. The package is not published; `@knk/cli` is a placeholder name.

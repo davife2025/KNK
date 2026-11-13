@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { IngestRequest, type IngestResponse, type TrustListResponse, type TrustState } from '@knk/shared';
 import { apiError } from '../lib/errors.js';
-import { redact } from '../lib/redact.js';
+import { redact } from '@knk/detect';
+import { fireTrustCritical, type ResponseEngine } from '../lib/response.js';
 import { TRUST_CONFIG } from '../lib/trust.js';
 import { trustSnapshot } from '../lib/trust-service.js';
 import { requireApiKey, requireScope, type AppEnv } from '../middleware/auth.js';
@@ -11,7 +12,7 @@ import type { NewEvent, Store } from '../store/types.js';
 
 const MAX_AGE_MS = 30 * 86_400_000;
 
-export function eventRoutes(store: Store): Hono<AppEnv> {
+export function eventRoutes(store: Store, engine: ResponseEngine): Hono<AppEnv> {
   const r = new Hono<AppEnv>();
   for (const path of ['/v1/events', '/v1/subjects/*', '/v1/trust']) {
     r.use(path, requireApiKey(store), meterUsage(store));
@@ -40,8 +41,11 @@ export function eventRoutes(store: Store): Hono<AppEnv> {
       }
 
       const { workspaceId } = c.get('auth');
+      const names = [...new Set(events.map((e) => e.subject))];
+      const before = await trustSnapshot(store, workspaceId, { subjects: names });
       await store.insertEvents(workspaceId, events);
-      const subjects = await trustSnapshot(store, workspaceId, { subjects: [...new Set(events.map((e) => e.subject))] });
+      const subjects = await trustSnapshot(store, workspaceId, { subjects: names });
+      fireTrustCritical(engine, workspaceId, before, subjects);
 
       c.set('units', events.length); // per-event metering: placeholder pricing weight
       const out: IngestResponse = { accepted: events.length, subjects };

@@ -181,6 +181,12 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.6
         version: 2.1.6(hono@4.13.17)
+      '@knk/detect':
+        specifier: workspace:*
+        version: link:../../packages/detect
+      '@knk/guard':
+        specifier: workspace:*
+        version: link:../../packages/guard
       '@knk/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -190,6 +196,9 @@ importers:
       hono:
         specifier: ^4.13.17
         version: 4.13.17
+      undici:
+        specifier: ^8.12.4
+        version: 8.12.4
       viem:
         specifier: ^2.57.17
         version: 2.57.17(typescript@7.0.2)(zod@4.6.7)
@@ -197,12 +206,34 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@knk/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+
+  apps/cli:
+    dependencies:
+      '@knk/detect':
+        specifier: workspace:*
+        version: link:../../packages/detect
+      '@knk/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
       vitest:
         specifier: ^5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
@@ -237,6 +268,35 @@ importers:
       tailwindcss:
         specifier: ^4.3.5
         version: 4.3.5
+
+  packages/detect:
+    dependencies:
+      '@knk/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+
+  packages/guard:
+    dependencies:
+      '@knk/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
+      vitest:
+        specifier: ^5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.7(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
   packages/shared:
     dependencies:
@@ -1405,6 +1465,10 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
+  undici@8.12.4:
+    resolution: {integrity: sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==}
+    engines: {node: '>=22.19.0'}
+
   viem@2.57.17:
     resolution: {integrity: sha512-yIMqNoKoVAMwX+zVbqkxfqq7qbGHmKXZidh/xfVpiPTJlAbbDDdDIMH5dDQWxhZcj56L8tPOwsIIxF618P+TOg==}
     peerDependencies:
@@ -2379,6 +2443,8 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   undici-types@8.9.0: {}
+
+  undici@8.12.4: {}
 
   viem@2.57.17(typescript@7.0.2)(zod@4.6.7):
     dependencies:

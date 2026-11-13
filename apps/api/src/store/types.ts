@@ -1,4 +1,4 @@
-import type { DecodedTx, EventAttrs, EventKind, GateDecisionPayload, GateHit, Outcome, PolicyRules, Scope, SignedVerdict, TrustLevel } from '@knk/shared';
+import type { Playbook, ResponseRun, Trigger, WebhookEnvelope, DecodedTx, EventAttrs, EventKind, GateDecisionPayload, GateHit, Outcome, PolicyRules, Scope, SignedVerdict, TrustLevel } from '@knk/shared';
 import type { TrustEvent } from '../lib/trust.js';
 
 export interface KeyRecord {
@@ -71,6 +71,44 @@ export interface ApprovalRecord {
   at: string;
 }
 
+export interface WebhookRecord {
+  id: string;
+  workspaceId: string;
+  url: string;
+  description: string | null;
+  secretEnc: string;
+  createdAt: string;
+}
+
+export interface NewPlaybook {
+  workspaceId: string;
+  name: string;
+  triggers: Trigger[];
+  subjects: string[];
+  webhookId: string;
+  kind: 'alert' | 'containment';
+  agentIds: string[];
+  cooldownSeconds: number;
+}
+
+export interface NewRun {
+  id: string;
+  workspaceId: string;
+  playbookId: string | null;
+  webhookId: string | null;
+  trigger: string;
+  subject: string;
+  eventType: string;
+  payload: WebhookEnvelope;
+}
+
+export interface RunResult {
+  ok: boolean;
+  attempts: number;
+  httpStatus: number | null;
+  error: string | null;
+}
+
 export interface UsageRow {
   endpoint: string;
   requests: number;
@@ -105,5 +143,18 @@ export interface Store {
   addApproval(workspaceId: string, id: string, a: { approver: string; apiKeyId: string }): Promise<'ok' | 'duplicate'>;
   /** Moves an open decision to rejected or consumed. Returns false if it was not open (so consume is single-use). */
   closeDecision(workspaceId: string, id: string, status: 'rejected' | 'consumed'): Promise<boolean>;
+  insertWebhook(input: { workspaceId: string; url: string; description: string | null; secretEnc: string }): Promise<WebhookRecord>;
+  listWebhooks(workspaceId: string): Promise<WebhookRecord[]>;
+  getWebhook(workspaceId: string, id: string): Promise<WebhookRecord | null>;
+  /** Also removes the playbooks that use it. */
+  deleteWebhook(workspaceId: string, id: string): Promise<boolean>;
+  insertPlaybook(input: NewPlaybook): Promise<Playbook>;
+  listPlaybooks(workspaceId: string): Promise<Playbook[]>;
+  deletePlaybook(workspaceId: string, id: string): Promise<boolean>;
+  /** True if a pending or delivered run exists since `since`. Failed runs do not count, so a retry is allowed. */
+  hasRecentRun(workspaceId: string, playbookId: string, subject: string, trigger: string, since: Date): Promise<boolean>;
+  insertRun(run: NewRun): Promise<void>;
+  finishRun(workspaceId: string, id: string, result: RunResult): Promise<void>;
+  listRuns(workspaceId: string, limit: number): Promise<ResponseRun[]>;
   listEvents(workspaceId: string, q: { since: Date; subject?: string; limit: number }): Promise<StoredEvent[]>;
 }
